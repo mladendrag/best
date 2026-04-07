@@ -83,11 +83,17 @@ function extractIndicators(raw) {
 }
 
 function extractStockInfo(html) {
-  const name = (html.match(/<h2[^>]*>([^<]+)<\/h2>/) || [])[1]?.trim() || '';
+  // <div class="name-ticker"><h1>TICKER</h1><h2>Nome da empresa</h2></div>
+  const block = html.match(
+    /<div[^>]*class=["']?name-ticker["']?[^>]*>([\s\S]*?)<\/div>/,
+  );
+  let name = '';
+  if (block) {
+    const h2 = block[1].match(/<h2[^>]*>([^<]+)<\/h2>/);
+    name = h2?.[1]?.trim() || '';
+  }
   const priceMatch = html.match(/cotacao[^>]*>[^R]*R\$\s*([\d.,]+)/);
-  const price = priceMatch
-    ? parseBR(priceMatch[1])
-    : null;
+  const price = priceMatch ? parseBR(priceMatch[1]) : null;
   return { name, price };
 }
 

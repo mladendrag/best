@@ -4,9 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Portfólio — Fundamentos</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --border:#334155; --blue:#3b82f6; --green:#22c55e; --red:#ef4444; --amber:#f59e0b; }
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --border:#334155; --green:#22c55e; --red:#ef4444; }
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; }
   h1 { margin: 0 0 0.25rem; }
@@ -17,7 +16,6 @@
   select { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.95rem; min-width: 180px; }
   .card { background: var(--card); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; }
   .card h2 { margin: 0 0 1rem; font-size: 1.05rem; }
-  canvas { background: var(--bg); border-radius: 8px; padding: 1rem; }
   table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
   th, td { padding: 0.4rem 0.5rem; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--card); font-weight: 600; z-index: 1; }
@@ -37,7 +35,6 @@
 
   <div class="controls">
     <label>Ativo <select id="ticker"></select></label>
-    <label>Indicador <select id="indicator"></select></label>
   </div>
 
   <div id="content" class="loading">Carregando dados…</div>
@@ -45,10 +42,6 @@
 
 <script>
 let DATA = null;
-const charts = {};
-
-const fmtBi = (v) => v == null ? '-' : `R$ ${(v/1e9).toFixed(2)} bi`;
-const fmtPct = (v) => v == null ? '-' : `${v.toFixed(2)}%`;
 
 async function init() {
   const res = await fetch('./data.json');
@@ -65,56 +58,26 @@ async function init() {
     sel.appendChild(o);
   });
   sel.addEventListener('change', () => render(sel.value));
-  document.getElementById('indicator').addEventListener('change', () => renderIndicator(sel.value));
-
   sel.value = tickers[0];
   render(tickers[0]);
-}
-
-function destroyCharts() {
-  Object.values(charts).forEach(c => c?.destroy());
 }
 
 function render(ticker) {
   const d = DATA.tickers[ticker];
   if (!d) return;
-
-  // indicators select
-  const indSel = document.getElementById('indicator');
-  const indicators = Object.keys(d.indicators || {});
-  const prev = indSel.value;
-  indSel.innerHTML = '';
-  indicators.forEach(name => {
-    const o = document.createElement('option');
-    o.value = name; o.textContent = name;
-    indSel.appendChild(o);
-  });
-  indSel.value = indicators.includes(prev) ? prev : indicators[0];
-
-  destroyCharts();
   const content = document.getElementById('content');
   content.className = '';
   content.innerHTML = `
     <div class="card">
       <div class="title-row">
-        <h2>${ticker} — ${d.info.name || ''}</h2>
+        <h2>${ticker}${d.info.name ? ' — ' + d.info.name : ''}</h2>
         ${d.info.price ? `<div class="price">R$ ${d.info.price.toFixed(2)}</div>` : ''}
       </div>
     </div>
 
     <div class="card">
-      <h2>Receita × Lucro Anual (R$ bi)</h2>
-      <canvas id="chartDRE" height="110"></canvas>
-    </div>
-
-    <div class="card">
-      <h2 id="indTitle">Histórico de Indicador</h2>
-      <canvas id="chartInd" height="110"></canvas>
-    </div>
-
-    <div class="card">
-      <h2>Receita × Lucro Trimestral (R$ bi)</h2>
-      <canvas id="chartQuarterly" height="110"></canvas>
+      <h2>Histórico Completo de Indicadores</h2>
+      <div class="scroll"><table id="indTable"></table></div>
     </div>
 
     <div class="card">
@@ -123,105 +86,32 @@ function render(ticker) {
     </div>
 
     <div class="card">
-      <h2>DRE Consolidada (endpoint ativosPassivos)</h2>
+      <h2>DRE Consolidada Anual (ativosPassivos, R$ bi)</h2>
       <div class="scroll"><table id="apTable"></table></div>
     </div>
 
     <div class="card">
-      <h2>Balanço Patrimonial Trimestral</h2>
+      <h2>Balanço Patrimonial Trimestral (R$ bi)</h2>
       <div class="scroll"><table id="bpTable"></table></div>
     </div>
 
     <div class="card">
-      <h2>Receita Trimestral (endpoint receitaliquida)</h2>
+      <h2>Receita Trimestral (R$ bi)</h2>
       <div class="scroll"><table id="rqTable"></table></div>
-    </div>
-
-    <div class="card">
-      <h2>Histórico Completo de Indicadores</h2>
-      <div class="scroll"><table id="indTable"></table></div>
     </div>
   `;
 
-  renderDREChart(d);
-  renderIndicator(ticker);
-  renderQuarterlyChart(d);
+  renderIndTable(d);
   renderDRETable(d);
   renderAPTable(d);
   renderBPTable(d);
   renderRQTable(d);
-  renderIndTable(d);
-}
-
-function renderDREChart(d) {
-  const dre = d.dreAnual;
-  if (!dre) return;
-  const years = dre.years;
-  const receita = (dre.rows['Receita Líquida'] || []).map(v => v ? v/1e9 : null);
-  const lucro = (dre.rows['Lucro Líquido'] || []).map(v => v ? v/1e9 : null);
-
-  charts.dre = new Chart(document.getElementById('chartDRE'), {
-    data: {
-      labels: years,
-      datasets: [
-        { type: 'bar', label: 'Receita Líquida', data: receita, backgroundColor: '#3b82f6', borderRadius: 4, order: 2 },
-        { type: 'line', label: 'Lucro Líquido', data: lucro, borderColor: '#22c55e', backgroundColor: '#22c55e', borderWidth: 3, tension: 0.3, pointRadius: 5, order: 1 },
-      ],
-    },
-    options: chartOpts('R$ ', ' bi'),
-  });
-}
-
-function renderIndicator(ticker) {
-  const d = DATA.tickers[ticker];
-  const name = document.getElementById('indicator').value;
-  if (!name || !d.indicators?.[name]) return;
-  const series = d.indicators[name];
-  const labels = series.map(s => s.year);
-  const values = series.map(s => typeof s.value === 'number' ? s.value : null);
-
-  document.getElementById('indTitle').textContent = `Histórico: ${name}`;
-
-  if (charts.ind) charts.ind.destroy();
-  charts.ind = new Chart(document.getElementById('chartInd'), {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: name, data: values,
-        borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.15)',
-        borderWidth: 3, tension: 0.3, pointRadius: 5, fill: true,
-      }],
-    },
-    options: chartOpts(),
-  });
-}
-
-function renderQuarterlyChart(d) {
-  const rq = d.receitaQuarterly;
-  if (!Array.isArray(rq) || rq.length === 0) return;
-  // filtrar ÚLT 12M e quarter 0
-  const rows = rq.filter(r => r.year && /^\d{4}$/.test(String(r.year)) && r.quarter && r.quarter !== 0 && r.quarter !== '0');
-  const labels = rows.map(r => `${r.quarter}T${r.year}`);
-  const receita = rows.map(r => r.net_revenue ? r.net_revenue/1e9 : null);
-  const lucro = rows.map(r => r.net_profit ? r.net_profit/1e9 : null);
-
-  charts.quarterly = new Chart(document.getElementById('chartQuarterly'), {
-    data: {
-      labels,
-      datasets: [
-        { type: 'bar', label: 'Receita', data: receita, backgroundColor: '#3b82f6', borderRadius: 4, order: 2 },
-        { type: 'line', label: 'Lucro', data: lucro, borderColor: '#22c55e', borderWidth: 2, tension: 0.3, pointRadius: 3, order: 1 },
-      ],
-    },
-    options: chartOpts('R$ ', ' bi'),
-  });
 }
 
 function renderDRETable(d) {
   const dre = d.dreAnual;
-  if (!dre) return;
   const t = document.getElementById('dreTable');
+  if (!dre) { t.innerHTML = '<tr><td>Sem dados</td></tr>'; return; }
   const { years, rows } = dre;
   const metricRows = Object.entries(rows);
   t.innerHTML = `
@@ -247,7 +137,7 @@ function renderAPTable(d) {
   const labels = {net_revenue:'Receita Líquida',cost:'Custo',gross_profit:'Lucro Bruto',ebitda:'EBITDA',ebit:'EBIT',tax:'Imposto',net_profit:'Lucro Líquido',net_worth:'Patrimônio Líquido'};
   const years = ap.map(r => r.year);
   t.innerHTML = `
-    <thead><tr><th>Métrica (R$ bi)</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
+    <thead><tr><th>Métrica</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
     <tbody>${fields.map(f => `
       <tr><td>${labels[f]}</td>${ap.map(r => {
         const v = r[f];
@@ -264,7 +154,7 @@ function renderBPTable(d) {
   const { years, rows } = bp;
   const metricRows = Object.entries(rows);
   t.innerHTML = `
-    <thead><tr><th>Métrica (R$ bi)</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
+    <thead><tr><th>Métrica</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
     <tbody>${metricRows.map(([name, arr]) => `
       <tr><td>${name}</td>${arr.map(v => {
         if (v == null) return '<td>-</td>';
@@ -278,7 +168,7 @@ function renderRQTable(d) {
   const t = document.getElementById('rqTable');
   if (!Array.isArray(rq) || rq.length === 0) { t.innerHTML = '<tr><td>Sem dados</td></tr>'; return; }
   t.innerHTML = `
-    <thead><tr><th>Período</th><th>Receita (R$ bi)</th><th>Custo (R$ bi)</th><th>Lucro (R$ bi)</th></tr></thead>
+    <thead><tr><th>Período</th><th>Receita</th><th>Custo</th><th>Lucro</th></tr></thead>
     <tbody>${rq.map(r => `
       <tr>
         <td>${r.quarter === 0 || r.quarter === '0' ? r.year : `${r.quarter}T${r.year}`}</td>
@@ -292,9 +182,9 @@ function renderRQTable(d) {
 function renderIndTable(d) {
   const inds = d.indicators || {};
   const names = Object.keys(inds);
-  if (names.length === 0) return;
-  const years = (inds[names[0]] || []).map(s => s.year);
   const t = document.getElementById('indTable');
+  if (names.length === 0) { t.innerHTML = '<tr><td>Sem dados</td></tr>'; return; }
+  const years = (inds[names[0]] || []).map(s => s.year);
   t.innerHTML = `
     <thead><tr><th>Indicador</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
     <tbody>${names.map(name => {
@@ -306,20 +196,6 @@ function renderIndTable(d) {
         return `<td>${n}</td>`;
       }).join('')}</tr>`;
     }).join('')}</tbody>`;
-}
-
-function chartOpts(prefix='', suffix='') {
-  return {
-    responsive: true,
-    plugins: {
-      legend: { labels: { color: '#e2e8f0' } },
-      tooltip: { callbacks: { label: c => `${c.dataset.label}: ${prefix}${(c.raw ?? 0).toFixed(2)}${suffix}` } },
-    },
-    scales: {
-      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-      y: { ticks: { color: '#94a3b8', callback: v => `${prefix}${v}${suffix}` }, grid: { color: '#334155' } },
-    },
-  };
 }
 
 init();
