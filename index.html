@@ -69,10 +69,7 @@ function render(ticker) {
   content.className = '';
   content.innerHTML = `
     <div class="card">
-      <div class="title-row">
-        <h2>${ticker}${d.info.name ? ' — ' + d.info.name : ''}</h2>
-        ${d.info.price ? `<div class="price">R$ ${d.info.price.toFixed(2)}</div>` : ''}
-      </div>
+      <h2>${ticker}${d.info.name ? ' — ' + d.info.name : ''}</h2>
     </div>
 
     <div class="card">

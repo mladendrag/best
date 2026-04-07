@@ -45,9 +45,13 @@ function extractTable(table, yearPattern = /^\d{4}$/) {
   const years = [];
   const yearIdx = [];
   for (let i = 0; i < header.length; i++) {
-    const v = typeof header[i] === 'string' ? header[i] : '';
-    if (yearPattern.test(v)) {
-      years.push(v);
+    const raw = typeof header[i] === 'string' ? header[i] : '';
+    const clean = raw.replace(/<[^>]*>/g, '').trim();
+    if (yearPattern.test(clean)) {
+      years.push(clean);
+      yearIdx.push(i);
+    } else if (/^ÚLT\.?\s*12M/i.test(clean)) {
+      years.push('ÚLT 12M');
       yearIdx.push(i);
     }
   }
@@ -72,7 +76,7 @@ function extractIndicators(raw) {
   for (const [name, series] of Object.entries(raw)) {
     if (!Array.isArray(series)) continue;
     out[name] = series
-      .filter((s) => s.year && s.year !== 'Atual')
+      .filter((s) => s.year)
       .map((s) => ({
         year: String(s.year),
         value: typeof s.value === 'number' ? s.value : null,
