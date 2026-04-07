@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfólio — Fundamentos</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --border:#334155; --blue:#3b82f6; --green:#22c55e; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
+  h1 { margin: 0 0 0.25rem; }
+  .sub { color: var(--muted); margin-bottom: 2rem; font-size: 0.9rem; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  select, input { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 1rem; }
+  select { min-width: 200px; }
+  .card { background: var(--card); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; }
+  .card h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+  canvas { background: var(--bg); border-radius: 8px; padding: 1rem; }
+  .loading { color: var(--muted); text-align: center; padding: 2rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Portfólio — Fundamentos</h1>
+  <div class="sub" id="meta">Carregando…</div>
+  <div class="controls">
+    <label>Ativo: <select id="ticker"></select></label>
+  </div>
+  <div id="content" class="loading">Carregando dados…</div>
+</div>
+<script>
+let DATA = null;
+let chartDRE = null;
+
+async function init() {
+  const res = await fetch('./data.json');
+  DATA = await res.json();
+  document.getElementById('meta').textContent =
+    `Atualizado em ${new Date(DATA.generatedAt).toLocaleString('pt-BR')} · ${Object.keys(DATA.tickers).length} ativos`;
+
+  const sel = document.getElementById('ticker');
+  Object.keys(DATA.tickers).sort().forEach(t => {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', () => render(sel.value));
+  sel.value = Object.keys(DATA.tickers)[0];
+  render(sel.value);
+}
+
+function render(ticker) {
+  const d = DATA.tickers[ticker];
+  if (!d) return;
+  const dre = d.dre;
+  const content = document.getElementById('content');
+  content.className = '';
+  content.innerHTML = `
+    <div class="card">
+      <h2>${ticker} — ${d.info.name || ''} · Receita vs Lucro Anual (R$ bi)</h2>
+      <canvas id="chartDRE" height="120"></canvas>
+    </div>
+  `;
+
+  if (chartDRE) chartDRE.destroy();
+  const years = dre?.years || [];
+  const receita = (dre?.receitaLiquida || []).map(v => v ? v / 1e9 : null);
+  const lucro = (dre?.lucroLiquido || []).map(v => v ? v / 1e9 : null);
+
+  chartDRE = new Chart(document.getElementById('chartDRE'), {
+    data: {
+      labels: years,
+      datasets: [
+        { type: 'bar', label: 'Receita Líquida', data: receita, backgroundColor: '#3b82f6', borderRadius: 4, order: 2 },
+        { type: 'line', label: 'Lucro Líquido', data: lucro, borderColor: '#22c55e', backgroundColor: '#22c55e', borderWidth: 3, tension: 0.3, pointRadius: 5, order: 1 },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#e2e8f0' } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: R$ ${(c.raw ?? 0).toFixed(2)} bi` } },
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+        y: { ticks: { color: '#94a3b8', callback: v => `R$ ${v} bi` }, grid: { color: '#334155' } },
+      },
+    },
+  });
+}
+
+init();
+</script>
+</body>
+</html>
