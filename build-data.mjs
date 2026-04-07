@@ -1,5 +1,4 @@
 // Lê o cache do MCP e gera um data.json enxuto para o site estático.
-// Uso: node build-data.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -8,48 +7,63 @@ const OUT = path.resolve('./data.json');
 
 const cache = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
 
-// Descobre tickers a partir das páginas HTML cacheadas
 const tickers = Object.keys(cache)
   .filter((k) => k.startsWith('text:/acoes/'))
   .map((k) => k.replace('text:/acoes/', '').toUpperCase())
   .sort();
 
-function parseNumberCell(cell) {
-  if (!cell) return null;
-  if (Array.isArray(cell)) {
-    const n = parseFloat(String(cell[1]).replace(/[^\d.-]/g, ''));
-    return isNaN(n) ? null : n;
+// Parser robusto para formato brasileiro:
+// "319.462.104.000" -> 319462104000 (inteiro com pontos = milhares)
+// "31,62 %" -> 31.62 (vírgula = decimal)
+// "R$ 23,41" -> 23.41
+// Arrays [display, raw] usam o raw.
+function parseBR(value) {
+  if (value == null || value === '-' || value === '') return null;
+  if (typeof value === 'number') return value;
+  if (Array.isArray(value)) {
+    return parseBR(value[1] ?? value[0]);
   }
-  if (typeof cell === 'string') {
-    const n = parseFloat(cell.replace(/[^\d.-]/g, ''));
-    return isNaN(n) ? null : n;
+  if (typeof value !== 'string') return null;
+  let s = value.trim().replace(/[R$\s%]/g, '');
+  if (s === '' || s === '-') return null;
+  const hasComma = s.includes(',');
+  if (hasComma) {
+    // comma = decimal, dot = thousands
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else {
+    // no comma: dots are thousands separators
+    s = s.replace(/\./g, '');
   }
-  return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
 }
 
-function extractDRE(dreTable) {
-  if (!Array.isArray(dreTable) || !Array.isArray(dreTable[0])) return null;
-  const header = dreTable[0];
+// Extrai tabela (array de arrays). Primeira linha = header com years.
+function extractTable(table, yearPattern = /^\d{4}$/) {
+  if (!Array.isArray(table) || !Array.isArray(table[0])) return null;
+  const header = table[0];
   const years = [];
   const yearIdx = [];
-  for (let i = 2; i < header.length; i++) {
-    if (typeof header[i] === 'string' && /^\d{4}$/.test(header[i])) {
-      years.push(header[i]);
+  for (let i = 0; i < header.length; i++) {
+    const v = typeof header[i] === 'string' ? header[i] : '';
+    if (yearPattern.test(v)) {
+      years.push(v);
       yearIdx.push(i);
     }
   }
-  function row(name) {
-    const r = dreTable.find((x) => String(x[0]).startsWith(name));
-    if (!r) return [];
-    return yearIdx.map((i) => parseNumberCell(r[i]));
+  const rows = {};
+  for (let r = 1; r < table.length; r++) {
+    const row = table[r];
+    if (!Array.isArray(row)) continue;
+    const name = String(row[0] || '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/\s*-\s*\(R\$\)\s*$/, '')
+      .replace(/\s*-\s*\(%\)\s*$/, '')
+      .trim();
+    if (!name || name === '#') continue;
+    rows[name] = yearIdx.map((i) => parseBR(row[i]));
   }
-  return {
-    years: years.reverse(),
-    receitaLiquida: row('Receita Líquida').reverse(),
-    lucroLiquido: row('Lucro Líquido').reverse(),
-    ebit: row('EBIT').reverse(),
-    lucroBruto: row('Lucro Bruto').reverse(),
-  };
+  return { years, rows };
 }
 
 function extractIndicators(raw) {
@@ -59,28 +73,32 @@ function extractIndicators(raw) {
     if (!Array.isArray(series)) continue;
     out[name] = series
       .filter((s) => s.year && s.year !== 'Atual')
-      .map((s) => ({ year: String(s.year), value: s.value }))
+      .map((s) => ({
+        year: String(s.year),
+        value: typeof s.value === 'number' ? s.value : null,
+      }))
       .reverse();
   }
   return out;
 }
 
 function extractStockInfo(html) {
-  // Extrai preço e nome simples por regex
   const name = (html.match(/<h2[^>]*>([^<]+)<\/h2>/) || [])[1]?.trim() || '';
-  const price = parseFloat(
-    (html.match(/cotacao[^>]*>[^R]*R\$\s*([\d.,]+)/) || [])[1]
-      ?.replace('.', '')
-      .replace(',', '.') || '0',
-  );
-  return { name, price: isNaN(price) ? null : price };
+  const priceMatch = html.match(/cotacao[^>]*>[^R]*R\$\s*([\d.,]+)/);
+  const price = priceMatch
+    ? parseBR(priceMatch[1])
+    : null;
+  return { name, price };
+}
+
+function findCacheKey(prefix) {
+  return Object.keys(cache).find((k) => k.startsWith(prefix));
 }
 
 const result = { generatedAt: new Date().toISOString(), tickers: {} };
 
 for (const ticker of tickers) {
   const lower = ticker.toLowerCase();
-
   const htmlEntry = cache[`text:/acoes/${lower}`];
   const html = htmlEntry?.data;
   if (!html) continue;
@@ -92,22 +110,45 @@ for (const ticker of tickers) {
   const tickerId = tMatch?.[1];
   const typeId = tMatch?.[2];
 
-  // Procura qualquer entrada de histórico-indicadores / balanços
-  const histKey = tickerId
-    ? `json:/api/historico-indicadores/${tickerId}/${typeId}?v=2`
-    : null;
-  const hist = histKey ? cache[histKey]?.data : null;
+  const hist =
+    tickerId &&
+    cache[`json:/api/historico-indicadores/${tickerId}/${typeId}?v=2`]?.data;
 
-  // Balanços com years variável — procura a chave que começa com o prefixo
-  const dreKeyPrefix = `json:/api/balancos/balancoresultados/chart/${companyId}/`;
-  const dreKey = Object.keys(cache).find((k) => k.startsWith(dreKeyPrefix));
-  const dre = dreKey ? cache[dreKey]?.data : null;
+  // Endpoints de balanço
+  const dreKey = findCacheKey(
+    `json:/api/balancos/balancoresultados/chart/${companyId}/`,
+  );
+  const dreTable = dreKey ? cache[dreKey]?.data : null;
+
+  const bpKey = findCacheKey(
+    `json:/api/balancos/balancopatrimonial/chart/${companyId}/`,
+  );
+  const bpTable = bpKey ? cache[bpKey]?.data : null;
+
+  const receitaQuarterly =
+    cache[`json:/api/balancos/receitaliquida/chart/${companyId}/`]?.data ||
+    null;
+
+  const ativosPassivos =
+    cache[`json:/api/balancos/ativospassivos/chart/${companyId}/`]?.data ||
+    null;
 
   result.tickers[ticker] = {
     ticker,
     info: extractStockInfo(html),
     indicators: extractIndicators(hist),
-    dre: extractDRE(dre),
+    dreAnual: extractTable(dreTable),
+    balancoPatrimonial: extractTable(bpTable, /^\d[TQ]\d{4}$/),
+    receitaQuarterly: Array.isArray(receitaQuarterly)
+      ? receitaQuarterly.map((r) => ({
+          year: r.year,
+          quarter: r.quarter,
+          net_revenue: r.net_revenue,
+          cost: r.cost,
+          net_profit: r.net_profit,
+        }))
+      : null,
+    ativosPassivos: Array.isArray(ativosPassivos) ? ativosPassivos : null,
   };
 }
 
