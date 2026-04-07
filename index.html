@@ -87,11 +87,6 @@ function render(ticker) {
     </div>
 
     <div class="card">
-      <h2>DRE Consolidada Anual (ativosPassivos, R$ bi)</h2>
-      <div class="scroll"><table id="apTable"></table></div>
-    </div>
-
-    <div class="card">
       <h2>Balanço Patrimonial Trimestral (R$ bi)</h2>
       <div class="scroll"><table id="bpTable"></table></div>
     </div>
@@ -104,7 +99,6 @@ function render(ticker) {
 
   renderIndTable(d);
   renderDRETable(d);
-  renderAPTable(d);
   renderBPTable(d);
   renderRQTable(d);
 }
