@@ -6,18 +6,27 @@
 <title>Portfólio — Fundamentos</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --border:#334155; --blue:#3b82f6; --green:#22c55e; }
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --border:#334155; --blue:#3b82f6; --green:#22c55e; --red:#ef4444; }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
+  body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; }
   h1 { margin: 0 0 0.25rem; }
-  .sub { color: var(--muted); margin-bottom: 2rem; font-size: 0.9rem; }
-  .wrap { max-width: 1100px; margin: 0 auto; }
+  .sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.85rem; }
+  .wrap { max-width: 1200px; margin: 0 auto; }
   .controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
-  select, input { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 1rem; }
-  select { min-width: 200px; }
+  label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+  select { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.95rem; min-width: 180px; }
   .card { background: var(--card); padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; }
-  .card h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+  .card h2 { margin: 0 0 1rem; font-size: 1.05rem; color: var(--text); }
   canvas { background: var(--bg); border-radius: 8px; padding: 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th, td { padding: 0.45rem 0.5rem; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--card); font-weight: 600; }
+  thead th { color: var(--muted); font-weight: 600; background: var(--card); position: sticky; top: 0; }
+  .scroll { overflow-x: auto; max-width: 100%; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  .price { font-size: 1.1rem; color: var(--muted); }
   .loading { color: var(--muted); text-align: center; padding: 2rem; }
 </style>
 </head>
@@ -25,50 +34,101 @@
 <div class="wrap">
   <h1>Portfólio — Fundamentos</h1>
   <div class="sub" id="meta">Carregando…</div>
+
   <div class="controls">
-    <label>Ativo: <select id="ticker"></select></label>
+    <label>Ativo <select id="ticker"></select></label>
+    <label>Indicador <select id="indicator"></select></label>
   </div>
+
   <div id="content" class="loading">Carregando dados…</div>
 </div>
+
 <script>
 let DATA = null;
 let chartDRE = null;
+let chartInd = null;
+
+const fmtBi = (v) => v == null ? '-' : `R$ ${(v/1e9).toFixed(2)} bi`;
+const fmtNum = (v) => v == null || v === '-' ? '-' : (typeof v === 'number' ? v.toFixed(2) : v);
 
 async function init() {
   const res = await fetch('./data.json');
   DATA = await res.json();
+
+  const tickers = Object.keys(DATA.tickers).sort();
   document.getElementById('meta').textContent =
-    `Atualizado em ${new Date(DATA.generatedAt).toLocaleString('pt-BR')} · ${Object.keys(DATA.tickers).length} ativos`;
+    `Atualizado em ${new Date(DATA.generatedAt).toLocaleString('pt-BR')} · ${tickers.length} ativos`;
 
   const sel = document.getElementById('ticker');
-  Object.keys(DATA.tickers).sort().forEach(t => {
+  tickers.forEach(t => {
     const o = document.createElement('option');
     o.value = t; o.textContent = t;
     sel.appendChild(o);
   });
   sel.addEventListener('change', () => render(sel.value));
-  sel.value = Object.keys(DATA.tickers)[0];
-  render(sel.value);
+
+  document.getElementById('indicator').addEventListener('change', () => renderIndicator(sel.value));
+
+  sel.value = tickers[0];
+  render(tickers[0]);
 }
 
 function render(ticker) {
   const d = DATA.tickers[ticker];
   if (!d) return;
-  const dre = d.dre;
+
+  // Preenche indicadores no select
+  const indSel = document.getElementById('indicator');
+  const indicators = Object.keys(d.indicators || {});
+  const prev = indSel.value;
+  indSel.innerHTML = '';
+  indicators.forEach(name => {
+    const o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    indSel.appendChild(o);
+  });
+  indSel.value = indicators.includes(prev) ? prev : indicators[0];
+
+  // Layout
   const content = document.getElementById('content');
   content.className = '';
   content.innerHTML = `
     <div class="card">
-      <h2>${ticker} — ${d.info.name || ''} · Receita vs Lucro Anual (R$ bi)</h2>
-      <canvas id="chartDRE" height="120"></canvas>
+      <div class="title-row">
+        <h2>${ticker} — ${d.info.name || ''}</h2>
+        ${d.info.price ? `<div class="price">R$ ${d.info.price.toFixed(2)}</div>` : ''}
+      </div>
+    </div>
+    <div class="card">
+      <h2>Receita Líquida × Lucro Líquido (anual)</h2>
+      <canvas id="chartDRE" height="110"></canvas>
+    </div>
+    <div class="card">
+      <h2 id="indTitle">Histórico de Indicador</h2>
+      <canvas id="chartInd" height="110"></canvas>
+    </div>
+    <div class="card">
+      <h2>DRE Anual Completa (R$ bi)</h2>
+      <div class="scroll"><table id="dreTable"></table></div>
+    </div>
+    <div class="card">
+      <h2>Tabela Completa de Indicadores</h2>
+      <div class="scroll"><table id="indTable"></table></div>
     </div>
   `;
 
-  if (chartDRE) chartDRE.destroy();
-  const years = dre?.years || [];
-  const receita = (dre?.receitaLiquida || []).map(v => v ? v / 1e9 : null);
-  const lucro = (dre?.lucroLiquido || []).map(v => v ? v / 1e9 : null);
+  renderDRE(d);
+  renderIndicator(ticker);
+  renderDRETable(d);
+  renderIndTable(d);
+}
 
+function renderDRE(d) {
+  const years = d.dre?.years || [];
+  const receita = (d.dre?.receitaLiquida || []).map(v => v ? v/1e9 : null);
+  const lucro = (d.dre?.lucroLiquido || []).map(v => v ? v/1e9 : null);
+
+  if (chartDRE) chartDRE.destroy();
   chartDRE = new Chart(document.getElementById('chartDRE'), {
     data: {
       labels: years,
@@ -77,18 +137,89 @@ function render(ticker) {
         { type: 'line', label: 'Lucro Líquido', data: lucro, borderColor: '#22c55e', backgroundColor: '#22c55e', borderWidth: 3, tension: 0.3, pointRadius: 5, order: 1 },
       ],
     },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { labels: { color: '#e2e8f0' } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: R$ ${(c.raw ?? 0).toFixed(2)} bi` } },
-      },
-      scales: {
-        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-        y: { ticks: { color: '#94a3b8', callback: v => `R$ ${v} bi` }, grid: { color: '#334155' } },
-      },
-    },
+    options: chartOpts('R$ ', ' bi'),
   });
+}
+
+function renderIndicator(ticker) {
+  const d = DATA.tickers[ticker];
+  const name = document.getElementById('indicator').value;
+  if (!name || !d.indicators?.[name]) return;
+  const series = d.indicators[name];
+  const labels = series.map(s => s.year);
+  const values = series.map(s => typeof s.value === 'number' ? s.value : null);
+
+  document.getElementById('indTitle').textContent = `Histórico: ${name}`;
+
+  if (chartInd) chartInd.destroy();
+  chartInd = new Chart(document.getElementById('chartInd'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: name, data: values,
+        borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.15)',
+        borderWidth: 3, tension: 0.3, pointRadius: 5, fill: true,
+      }],
+    },
+    options: chartOpts(),
+  });
+}
+
+function renderDRETable(d) {
+  const dre = d.dre;
+  if (!dre) return;
+  const { years, receitaLiquida, lucroBruto, ebit, lucroLiquido } = dre;
+  const rows = [
+    ['Receita Líquida', receitaLiquida],
+    ['Lucro Bruto', lucroBruto],
+    ['EBIT', ebit],
+    ['Lucro Líquido', lucroLiquido],
+  ];
+  const t = document.getElementById('dreTable');
+  t.innerHTML = `
+    <thead><tr><th>Métrica</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(([name, arr]) => `
+      <tr><td>${name}</td>${(arr || []).map(v => {
+        const n = v != null ? (v/1e9).toFixed(2) : '-';
+        const cls = v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+        return `<td class="${cls}">${n}</td>`;
+      }).join('')}</tr>`).join('')}
+    </tbody>`;
+}
+
+function renderIndTable(d) {
+  const inds = d.indicators || {};
+  const names = Object.keys(inds);
+  if (names.length === 0) return;
+  // union of years from first indicator
+  const years = (inds[names[0]] || []).map(s => s.year);
+  const t = document.getElementById('indTable');
+  t.innerHTML = `
+    <thead><tr><th>Indicador</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>
+    <tbody>${names.map(name => {
+      const series = inds[name];
+      const map = Object.fromEntries(series.map(s => [s.year, s.value]));
+      return `<tr><td>${name}</td>${years.map(y => {
+        const v = map[y];
+        const n = typeof v === 'number' ? v.toFixed(2) : (v ?? '-');
+        return `<td>${n}</td>`;
+      }).join('')}</tr>`;
+    }).join('')}</tbody>`;
+}
+
+function chartOpts(prefix='', suffix='') {
+  return {
+    responsive: true,
+    plugins: {
+      legend: { labels: { color: '#e2e8f0' } },
+      tooltip: { callbacks: { label: c => `${c.dataset.label}: ${prefix}${(c.raw ?? 0).toFixed(2)}${suffix}` } },
+    },
+    scales: {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+      y: { ticks: { color: '#94a3b8', callback: v => `${prefix}${v}${suffix}` }, grid: { color: '#334155' } },
+    },
+  };
 }
 
 init();
