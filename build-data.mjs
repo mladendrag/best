@@ -150,13 +150,24 @@ for (const ticker of tickers) {
     dreAnual: extractTable(dreTable),
     balancoPatrimonial: extractTable(bpTable, /^\d[TQ]\d{4}$/),
     receitaQuarterly: Array.isArray(receitaQuarterly)
-      ? receitaQuarterly.map((r) => ({
-          year: r.year,
-          quarter: r.quarter,
-          net_revenue: r.net_revenue,
-          cost: r.cost,
-          net_profit: r.net_profit,
-        }))
+      ? (() => {
+          const byYear = {};
+          const out = [];
+          for (const r of receitaQuarterly) {
+            const y = String(r.year);
+            if (y === 'ÚLT 12M') continue;
+            if (!/^\d{4}$/.test(y)) continue;
+            byYear[y] = (byYear[y] || 0) + 1;
+            out.push({
+              year: y,
+              quarter: byYear[y],
+              net_revenue: r.net_revenue,
+              cost: r.cost,
+              net_profit: r.net_profit,
+            });
+          }
+          return out;
+        })()
       : null,
     ativosPassivos: Array.isArray(ativosPassivos) ? ativosPassivos : null,
   };
